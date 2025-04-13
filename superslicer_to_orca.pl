@@ -4,6 +4,7 @@ use warnings;
 no warnings "exiting";
 
 use Getopt::Long;
+use File::Spec;
 use File::Basename;
 use File::Glob ':glob';
 use File::HomeDir;
@@ -14,6 +15,7 @@ use Term::Choose;
 use Term::Form::ReadLine;
 use Text::SimpleTable;
 use JSON::XS;
+use Data::Dumper;
 
 # Constants
 my $ORCA_SLICER_VERSION = '2.2.0.0';
@@ -107,6 +109,7 @@ my %status = (
     legacy_overwrite => 0,
     max_temp         => 0,
     interactive_mode => 0,
+    output_config_bundle => undef,
     slicer_flavor    => undef,
     ini_type         => undef,
     profile_name     => undef,
@@ -158,6 +161,7 @@ GetOptions(
     "skip-link-system-printer" => sub { $status{value}{inherits} = '' },
     "physical-printer:s" => \$status{value}{physical_printer},
     "force-output"       => \$status{force_out},
+    "output_config_bundle=s"  => \$status{output_config_bundle},
     "h|help"             => sub { print_usage_and_exit(); },
 ) or die("Error in command-line arguments.\n");
 
@@ -182,6 +186,23 @@ if ( defined $status{value}{on_existing} ) {
 # Handle deprecated --overwrite option to maintain compatibility
 $status{value}{on_existing} = $on_existing_opts{overwrite}
   if $status{legacy_overwrite};
+
+if ( defined $status{output_config_bundle} ) {
+    #die "Cannot specify --outdir or --force-output with --output_config_bundle options together." if ( defined $status{dirs}{output} or $status{force_out} );
+    die "Must specify --skip-link-system-printer with --output_config_bundle." unless ( defined $status{value}{inherits} and $status{value}{inherits} eq ''  ); # TODO: This can be fixed by separating output variable and OrcaSlicer config directory variable.
+    #TODO: Check that file is writable.
+    $status{output_config_bundle}  = File::Spec->rel2abs( $status{output_config_bundle}  ) ;
+    if (not defined $status{dirs}{output} ) {
+        $status{dirs}{output}   = dir( Path::Tiny->tempdir );
+    }
+    $system_directories{'output'}{'filament'} = ['filament'];
+    $system_directories{'output'}{'printer'} = ['printer'];
+    $system_directories{'output'}{'print'} = ['process'];
+    dir($status{dirs}{output}, @{ $system_directories{'output'}{'filament'} } )->mkpath;
+    dir($status{dirs}{output}, @{ $system_directories{'output'}{'printer'} }  )->mkpath;
+    dir($status{dirs}{output}, @{ $system_directories{'output'}{'print'} }    )->mkpath;
+
+}
 
 # Set default output directory if not specified
 $status{dirs}{output} //= dir( $status{dirs}{data}, 'OrcaSlicer' );
@@ -1778,6 +1799,45 @@ foreach my $index ( 0 .. $#expanded_input_files ) {
         : "YES",
         undef
     );
+}
+
+if($status{output_config_bundle}) {
+    # Create bundle_structure.json
+    # "printer_preset_name": "Sovol SV06 0.4 High-Speed nozzle - Octoprint",
+    my $output_file = file( $status{dirs}{output}, "bundle_structure.json" );
+    my %oh;
+    my $timestring = time();
+    $oh{"bundle_id"} = "superslicer_to_orca_converted_$timestring";
+    $oh{"bundle_type"} = "printer config bundle";
+
+    sub get_successfully_converted_files {
+        my ($filesArrayPtr, $pathPrefixPtr) = @_;
+        my @tmp = ();
+        foreach my $converted_file ( @{ $filesArrayPtr } ) {
+            if($converted_file->{'success'} eq 'YES') {
+                my $tmppath = path(@{$pathPrefixPtr}, $converted_file->{output_file});
+                push(@tmp, "$tmppath");
+            }
+        }
+        #die "Must have at least one" unless scalar(@tmp) > 0;
+        return @tmp;
+    }
+
+    @{$oh{"printer_config"}} = get_converted_files($converted_files{'Printer'} , $system_directories{'output'}{'printer'});
+    @{$oh{"filament_config"}} = get_converted_files($converted_files{'Filament'} , $system_directories{'output'}{'filament'});
+    @{$oh{"process_config"}} = get_converted_files($converted_files{'Print'} , $system_directories{'output'}{'print'});
+
+    $oh{"version"} = "";
+
+    #print("=============\n");
+    #print Dumper(\%oh);
+    #print("=============\n");
+
+    $output_file->spew( JSON::XS->new->utf8->pretty->canonical->encode( \%oh ) );
+
+    system("cd $status{dirs}{output}; zip -jr $status{output_config_bundle} .");
+
+    print "Created OrcaSlicer Bundle $status{output_config_bundle}\n";
 }
 
 exit_with_conversion_summary();
