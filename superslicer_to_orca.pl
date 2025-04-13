@@ -16,6 +16,7 @@ use Term::Form::ReadLine;
 use Text::SimpleTable;
 use JSON::XS;
 use Data::Dumper;
+use Archive::Zip qw(:ERROR_CODES :CONSTANTS);
 
 # Constants
 my $ORCA_SLICER_VERSION = '2.2.0.0';
@@ -191,7 +192,6 @@ if ( defined $status{output_config_bundle} ) {
     #die "Cannot specify --outdir or --force-output with --output_config_bundle options together." if ( defined $status{dirs}{output} or $status{force_out} );
     die "Must specify --skip-link-system-printer with --output_config_bundle." unless ( defined $status{value}{inherits} and $status{value}{inherits} eq ''  ); # TODO: This can be fixed by separating output variable and OrcaSlicer config directory variable.
     #TODO: Check that file is writable.
-    $status{output_config_bundle}  = File::Spec->rel2abs( $status{output_config_bundle}  ) ;
     if (not defined $status{dirs}{output} ) {
         $status{dirs}{output}   = dir( Path::Tiny->tempdir );
     }
@@ -1803,7 +1803,6 @@ foreach my $index ( 0 .. $#expanded_input_files ) {
 
 if($status{output_config_bundle}) {
     # Create bundle_structure.json
-    # "printer_preset_name": "Sovol SV06 0.4 High-Speed nozzle - Octoprint",
     my $output_file = file( $status{dirs}{output}, "bundle_structure.json" );
     my %oh;
     my $timestring = time();
@@ -1813,29 +1812,53 @@ if($status{output_config_bundle}) {
     sub get_successfully_converted_files {
         my ($filesArrayPtr, $pathPrefixPtr) = @_;
         my @tmp = ();
-        foreach my $converted_file ( @{ $filesArrayPtr } ) {
+        foreach my $converted_file ( @$filesArrayPtr ) {
             if($converted_file->{'success'} eq 'YES') {
-                my $tmppath = path(@{$pathPrefixPtr}, $converted_file->{output_file});
+                my $tmppath = path(@$pathPrefixPtr, $converted_file->{output_file});
                 push(@tmp, "$tmppath");
             }
         }
-        #die "Must have at least one" unless scalar(@tmp) > 0;
         return @tmp;
     }
 
-    @{$oh{"printer_config"}} = get_converted_files($converted_files{'Printer'} , $system_directories{'output'}{'printer'});
-    @{$oh{"filament_config"}} = get_converted_files($converted_files{'Filament'} , $system_directories{'output'}{'filament'});
-    @{$oh{"process_config"}} = get_converted_files($converted_files{'Print'} , $system_directories{'output'}{'print'});
+    @{$oh{"printer_config"}} = get_successfully_converted_files($converted_files{'Printer'} , $system_directories{'output'}{'printer'});
+    @{$oh{"filament_config"}} = get_successfully_converted_files($converted_files{'Filament'} , $system_directories{'output'}{'filament'});
+    @{$oh{"process_config"}} = get_successfully_converted_files($converted_files{'Print'} , $system_directories{'output'}{'print'});
 
     $oh{"version"} = "";
 
-    #print("=============\n");
-    #print Dumper(\%oh);
-    #print("=============\n");
-
     $output_file->spew( JSON::XS->new->utf8->pretty->canonical->encode( \%oh ) );
 
-    system("cd $status{dirs}{output}; zip -jr $status{output_config_bundle} .");
+    sub create_zip_bundle {
+        my ($dir2zip, $zipfile)  = @_;
+        # Ensure the output_config_bundle path is absolute
+        $zipfile = File::Spec->rel2abs($zipfile);
+
+        # Create a new zip archive
+        my $zip = Archive::Zip->new();
+
+        # Change to the desired directory
+        chdir($dir2zip) or die "Cannot change to directory $dir2zip: $!";
+
+        # Add all files in the current directory to the zip archive
+        opendir(my $dh, '.') or die "Cannot open directory $dir2zip: $!";
+        while (my $file = readdir($dh)) {
+            next if $file =~ /^\.\.?$/; # Skip '.' and '..'
+            if (-d $file) {
+                $zip->addTree($file, $file); # Add directories recursively
+            } else {
+                $zip->addFile($file, $file); # Add individual files
+            }
+        }
+        closedir($dh);
+
+        # Save the zip file
+        unless ($zip->writeToFileNamed($zipfile) == AZ_OK) {
+            die "Failed to create zip file: $!";
+        }
+    }
+
+    create_zip_bundle($status{dirs}{output}, $status{output_config_bundle});
 
     print "Created OrcaSlicer Bundle $status{output_config_bundle}\n";
 }
