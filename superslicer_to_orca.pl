@@ -16,7 +16,7 @@ use Text::SimpleTable;
 use JSON::XS;
 
 # Constants
-my $ORCA_SLICER_VERSION = '1.6.0.0';
+my $ORCA_SLICER_VERSION = '2.2.0.0';
 
 # Subroutine to print usage instructions and exit
 sub print_usage_and_exit {
@@ -149,6 +149,13 @@ GetOptions(
     "overwrite"          => \$status{legacy_overwrite},
     "on-existing:s"      => \$status{value}{on_existing},
     "nozzle-size"        => \$status{value}{nozzle_size},
+    "compatible_printers_condition=s" => sub {  $status{value}{compatible_printers_condition} = $_[1]; 
+                                                die "$_[0] must be KEEP or DISCARD. You specified: $_[1]" unless ( $_[1] eq 'KEEP' or $_[1] eq 'DISCARD' ); 
+                                        },
+    "compatible_prints_condition=s" => sub {  $status{value}{compatible_prints_condition} = $_[1]; 
+                                                die "$_[0] must be KEEP or DISCARD. You specified: $_[1]" unless ( $_[1] eq 'KEEP' or $_[1] eq 'DISCARD' ); 
+                                        },
+    "skip-link-system-printer" => sub { $status{value}{inherits} = '' },
     "physical-printer:s" => \$status{value}{physical_printer},
     "force-output"       => \$status{force_out},
     "h|help"             => sub { print_usage_and_exit(); },
@@ -972,11 +979,16 @@ sub convert_params {
         'feature_gcode'            => $unbackslash_gcode,
         'end_gcode'                => $unbackslash_gcode,
         'pause_print_gcode'        => $unbackslash_gcode,
-        'start_gcode'              => $unbackslash_gcode,
         'template_custom_gcode'    => $unbackslash_gcode,
         'notes'                    => $unbackslash_gcode,
         'filament_notes'           => $unbackslash_gcode,
         'printer_notes'            => $unbackslash_gcode,
+
+        'start_gcode' => sub {
+            $new_value =~ s/\[first_layer_bed_temperature\]/[bed_temperature_initial_layer_single]/g;
+            $new_value =~ s/\[first_layer_temperature\[initial_extruder\]\]/[nozzle_temperature_initial_layer]/g;
+            return $unbackslash_gcode->();
+        },
 
         # Translate filament type to a specific value if it exists in
         # the mapping, otherwise keep the original value
@@ -1124,9 +1136,10 @@ sub convert_params {
             return ( $new_value > 0 ) ? '1' : '0';
         },
 
-        # OrcaSlicer uses angle brackets instead of square here
         'output_filename_format' => sub {
-            return $new_value =~ s/\[|\]/ { $& eq '[' ? '{' : '}' } /egr;
+            $new_value =~ s/\[printer_settings_id\]/\[printer_preset\]-\[print_preset\]/g;
+            $new_value =~ s/filament_settings_id/filament_preset/g;
+            return $new_value;
         },
 
         # If this is a percent, try to calculate based on external extrusion
