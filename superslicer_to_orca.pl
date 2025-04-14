@@ -36,12 +36,26 @@ Options:
                                 path(s) containing a space must be enclosed in
                                 quotes. (Optional)
 
-  --outdir <DIRECTORY>          Specifies the ROOT OrcaSlicer settings directory.
+  --orca-config-dir <DIR>       Specifies the ROOT OrcaSlicer settings directory.
                                 (Optional) If this is not specified, the script will
-                                default to the typical location, which is:      
+                                default to the "outdir" option. If that's also not
+                                specified, it'll use typical location, which is:
                    in Windows:  C:\Users\%USERNAME%\AppData\Roaming\OrcaSlicer
                      in MacOS:  ~/Library/Application Support/OrcaSlicer
                      in Linux:  ~/.config/OrcaSlicer
+
+  --outdir <DIRECTORY>          Specifies the output directory.
+                                (Optional) If not specified, and not generating
+                                config bundle, this defaults to config directory
+                                itself directly updating Orcaslicer.
+                                If generating config bundle, uses this defaults to
+                                temporary directory.
+
+  --output-config-bundle <OUTPUT_FILE.orca_printer>
+
+                                Specifies the output config bundle file to generate
+                                instead of writing directly to settings. This config
+                                bundle can be imported into OrcaSlicer.
 
   --nozzle-size <DECIMAL>       For print profiles, specifies the diameter (in 
                                 mm) of the nozzle the print profile is
@@ -69,6 +83,24 @@ Options:
                                 '--outdir'. Use this option if you do not want 
                                 the new files to be placed in your OrcaSlicer 
                                 settings folder. (Optional)
+
+  --compatible_printers_condition < KEEP | DISCARD >
+  --compatible_prints_condition < KEEP | DISCARD >
+
+                                Whether to KEEP or DISCARD the condition if it
+                                is set in the original config file. (Optional)
+
+  --printer-models-json <FILE>  Specify a json file that contains the mapping for
+                                input config's printer name to "printer_model".
+                                Orcaslicer uses "printer_model" to correctly load
+                                the build plate image and stl. (Optional)
+
+  --skip-link-system-printer    Skip linking to an OrcaSlicer configured printer.
+                                In OrcaSlicer, each "machine" profile must be
+                                associated with a system printer profile for network
+                                configuration and g-code upload to work.
+                                Specifying this means you'll need configure your
+                                network manually. (Optional)
 
   -h, --help                    Displays this usage information.
 END_USAGE
@@ -156,11 +188,11 @@ GetOptions(
     "overwrite"          => \$status{legacy_overwrite},
     "on-existing:s"      => \$status{value}{on_existing},
     "nozzle-size"        => \$status{value}{nozzle_size},
-    "compatible_printers_condition=s" => sub {  $status{value}{compatible_printers_condition} = $_[1]; 
-                                                die "$_[0] must be KEEP or DISCARD. You specified: $_[1]" unless ( $_[1] eq 'KEEP' or $_[1] eq 'DISCARD' ); 
+    "compatible_printers_condition=s" => sub {  $status{value}{compatible_printers_condition} = $_[1];
+                                                die "$_[0] must be KEEP or DISCARD. You specified: $_[1]" unless ( $_[1] eq 'KEEP' or $_[1] eq 'DISCARD' );
                                         },
-    "compatible_prints_condition=s" => sub {  $status{value}{compatible_prints_condition} = $_[1]; 
-                                                die "$_[0] must be KEEP or DISCARD. You specified: $_[1]" unless ( $_[1] eq 'KEEP' or $_[1] eq 'DISCARD' ); 
+    "compatible_prints_condition=s" => sub {  $status{value}{compatible_prints_condition} = $_[1];
+                                                die "$_[0] must be KEEP or DISCARD. You specified: $_[1]" unless ( $_[1] eq 'KEEP' or $_[1] eq 'DISCARD' );
                                         },
     "skip-link-system-printer" => sub { $status{value}{inherits} = '' },
     "physical-printer:s" => \$status{value}{physical_printer},
