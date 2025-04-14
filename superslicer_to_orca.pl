@@ -111,6 +111,7 @@ my %status = (
     max_temp         => 0,
     interactive_mode => 0,
     output_config_bundle => undef,
+    printer_models_hash => undef,
     slicer_flavor    => undef,
     ini_type         => undef,
     profile_name     => undef,
@@ -162,7 +163,8 @@ GetOptions(
     "skip-link-system-printer" => sub { $status{value}{inherits} = '' },
     "physical-printer:s" => \$status{value}{physical_printer},
     "force-output"       => \$status{force_out},
-    "output_config_bundle=s"  => \$status{output_config_bundle},
+    "output-config-bundle=s"  => \$status{output_config_bundle},
+    "printer-models-json=s"  => sub { $status{printer_models_hash} = decode_json(file($_[1])->slurp()); },
     "h|help"             => sub { print_usage_and_exit(); },
 ) or die("Error in command-line arguments.\n");
 
@@ -188,8 +190,10 @@ if ( defined $status{value}{on_existing} ) {
 $status{value}{on_existing} = $on_existing_opts{overwrite}
   if $status{legacy_overwrite};
 
+# Handle generating orcaslicer_config_bundle.
+# The bundle has slightly different directory structure and a bundle_structure.json, zipped together.
 if ( defined $status{output_config_bundle} ) {
-    #die "Cannot specify --outdir or --force-output with --output_config_bundle options together." if ( defined $status{dirs}{output} or $status{force_out} );
+    die "Cannot specify --force-output with --output_config_bundle options." if ( $status{force_out} );
     die "Must specify --skip-link-system-printer with --output_config_bundle." unless ( defined $status{value}{inherits} and $status{value}{inherits} eq ''  ); # TODO: This can be fixed by separating output variable and OrcaSlicer config directory variable.
     #TODO: Check that file is writable.
     if (not defined $status{dirs}{output} ) {
@@ -1743,6 +1747,12 @@ foreach my $index ( 0 .. $#expanded_input_files ) {
         my %inherits          = link_system_printer($file);
         my %phys_printer_data = handle_physical_printer($input_file);
         %new_hash = ( %new_hash, %phys_printer_data, %inherits );
+        if ( defined $status{printer_models_hash} ) {
+            # Orca slicer gets the build plate model & image based printer_model, so it's valuable to specify this.
+            die "printer_model is already defined in source config, don't specify the option" if defined $new_hash{'printer_model'};
+            die "printer name = \"$new_hash{name}\" not found in the printer_models json. Please fix this." if not defined $status{printer_models_hash}{$new_hash{name}};
+            $new_hash{printer_model} = $status{printer_models_hash}{$new_hash{name}};
+        }
     }
 
     # Check if the output file already exists and handle overwrite option
