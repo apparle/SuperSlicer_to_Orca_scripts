@@ -119,6 +119,7 @@ my %status = (
     iterations_left  => undef,
     dirs             => {
         output => undef,
+        orca_config => undef,
         data   =>
           dir( File::HomeDir->my_home, @{ $system_directories{'os'}{$^O} } ),
         slicer => undef,
@@ -151,6 +152,7 @@ my %status = (
 GetOptions(
     "input:s{1,}"        => \@input_files,
     "outdir:s"           => \$status{dirs}{output},
+    "orca-config-dir=s"  => \$status{dirs}{orca_config},
     "overwrite"          => \$status{legacy_overwrite},
     "on-existing:s"      => \$status{value}{on_existing},
     "nozzle-size"        => \$status{value}{nozzle_size},
@@ -190,26 +192,26 @@ if ( defined $status{value}{on_existing} ) {
 $status{value}{on_existing} = $on_existing_opts{overwrite}
   if $status{legacy_overwrite};
 
+# Set orca_config directory if not specified, either same as outdir if that's specified, or OS default.
+if (not defined $status{dirs}{orca_config}) {
+    $status{dirs}{orca_config} = defined($status{dirs}{output}) ? dir($status{dirs}{output}) : dir($status{dirs}{data},'OrcaSlicer');
+}
+
 # Handle generating orcaslicer_config_bundle.
 # The bundle has slightly different directory structure and a bundle_structure.json, zipped together.
 if ( defined $status{output_config_bundle} ) {
     die "Cannot specify --force-output with --output_config_bundle options." if ( $status{force_out} );
-    die "Must specify --skip-link-system-printer with --output_config_bundle." unless ( defined $status{value}{inherits} and $status{value}{inherits} eq ''  ); # TODO: This can be fixed by separating output variable and OrcaSlicer config directory variable.
-    #TODO: Check that file is writable.
-    if (not defined $status{dirs}{output} ) {
-        $status{dirs}{output}   = dir( Path::Tiny->tempdir );
-    }
+    $status{dirs}{output}   //= dir( Path::Tiny->tempdir );
     $system_directories{'output'}{'filament'} = ['filament'];
     $system_directories{'output'}{'printer'} = ['printer'];
     $system_directories{'output'}{'print'} = ['process'];
     dir($status{dirs}{output}, @{ $system_directories{'output'}{'filament'} } )->mkpath;
     dir($status{dirs}{output}, @{ $system_directories{'output'}{'printer'} }  )->mkpath;
     dir($status{dirs}{output}, @{ $system_directories{'output'}{'print'} }    )->mkpath;
-
 }
 
 # Set default output directory if not specified
-$status{dirs}{output} //= dir( $status{dirs}{data}, 'OrcaSlicer' );
+$status{dirs}{output} //= $status{dirs}{orca_config};
 
 # Subroutine to verify output directory before writing
 sub check_output_directory {
@@ -1392,7 +1394,8 @@ sub link_system_printer {
         return ( 'inherits' => $status{value}{inherits} )
     }
     my ($input_file) = @_;
-    my $sys_dir = dir( $status{dirs}{output}, 'system' );
+    my $sys_dir = dir( $status{dirs}{orca_config}, 'system' );
+    die "Unable to open orca_config directory: \"$sys_dir\". Either use --orca-config-dir to specify correct directory or use --skip-link-system-printer to skip this step." unless ( -d $sys_dir );
     my %unique_names;
     if (-d $sys_dir) {
         foreach my $file ($sys_dir->children) {
